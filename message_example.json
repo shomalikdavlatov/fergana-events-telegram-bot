@@ -1,0 +1,38 @@
+{
+    "message_id": 79,
+    "from": {
+        "id": 1010419662,
+        "is_bot": false,
+        "first_name": "Shomalik",
+        "last_name": "Davlatov",
+        "username": "shomalikdavlatov",
+        "language_code": "en",
+        "is_premium": true
+    },
+    "chat": {
+        "id": 1010419662,
+        "first_name": "Shomalik",
+        "last_name": "Davlatov",
+        "username": "shomalikdavlatov",
+        "type": "private"
+    },
+    "date": 1762857488,
+    "text": "f", 
+    "voice": {
+      "duration": 1,
+      "mime_type": "audio/ogg",
+      "file_id": "AwACAgIAAxkBAANpaRMeuaT7NmEpF9JmMoTgVOHzf6QAAiqGAALId5lI8wVExWozGZE2BA",
+      "file_unique_id": "AgADKoYAAsh3mUg",
+      "file_size": 7140
+    },
+    "video_note": {
+      "duration": 1,
+      "length": 300,
+      "thumbnail": ["Object"],
+      "thumb": ["Object"],
+      "file_id": "DQACAgIAAxkBAANoaRMeFOWmHa7Jzp_kO6KEFqpADXQAAiKGAALId5lI_FW0X2aX8yY2BA",
+      "file_unique_id": "AgADIoYAAsh3mUg",
+      "file_size": 57147
+    }
+
+}
