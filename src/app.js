@@ -1,7 +1,6 @@
-const dotenv = require('dotenv');
-dotenv.config();
-const express = require('express');
-const { handler } = require('./controllers/index');
+import 'dotenv/config';
+import express from 'express';
+import {handler} from './controllers/index.js';
 
 const app = express();
 const port = process.env.PORT || 4040;

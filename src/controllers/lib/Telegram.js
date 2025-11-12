@@ -1,4 +1,4 @@
-const { axiosInstance } = require("./axios");
+import axiosInstance from './axios.js';
 
 const mediaGroups = new Map();
 
@@ -8,10 +8,11 @@ function sendMessage(messageObj, messageText) {
         text: messageText,
     });
 }
+
 function sendToAdmin(messageObj) {
     const messageText = `Name of sender: ${
-        messageObj.from.first_name + " " + messageObj.from.last_name || ""
-    }\nUsername: @${messageObj.from.username || "N/A"}\nUser ID: ${
+        messageObj.from.first_name} ${messageObj.from.last_name ? messageObj.from.last_name : ""
+    }\nUsername: ${messageObj.from.username ? '@' + messageObj.from.username : "-"}\nUser ID: ${
         messageObj.from.id
     }\n\nMessage: ${messageObj.text}`;
     const OWNER_ID = process.env.OWNER_ID;
@@ -110,4 +111,4 @@ async function finalizeMediaGroup(group) {
     });
 }
 
-module.exports = { handleTelegramUpdate };
+export { handleTelegramUpdate };

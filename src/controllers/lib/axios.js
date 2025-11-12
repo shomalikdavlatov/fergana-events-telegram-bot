@@ -1,4 +1,4 @@
-const axios = require("axios");
+import axios from 'axios'
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const BASE_URL = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
@@ -19,4 +19,4 @@ function getAxiosInstance() {
     };
 }
 
-module.exports = { axiosInstance: getAxiosInstance() };
+export default getAxiosInstance();

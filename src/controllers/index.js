@@ -1,4 +1,4 @@
-const { handleMessage, handleTelegramUpdate } = require('../controllers/lib/Telegram');
+import { handleTelegramUpdate } from './lib/Telegram.js';
 
 async function handler(req, method) {
     const body = req.body;
@@ -8,4 +8,4 @@ async function handler(req, method) {
     }
 }
 
-module.exports = { handler };
+export { handler };
