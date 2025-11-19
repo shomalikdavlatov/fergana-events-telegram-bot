@@ -86,7 +86,7 @@ async function handleTelegramUpdate(update) {
         group.timeout = setTimeout(async () => {
             await finalizeMediaGroup(group);
             mediaGroups.delete(groupId);
-        }, 1000);
+        }, 5000);
     } else {
         handleMessage(msg);
     }
