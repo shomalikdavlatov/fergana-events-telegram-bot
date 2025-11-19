@@ -97,7 +97,6 @@ function handleMessage(messageObj) {
 async function handleTelegramUpdate(update) {
     if (!update.message) return;
     
-    console.log("Received a message");
     const msg = update.message;
 
     if (msg.media_group_id) {
