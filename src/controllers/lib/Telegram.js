@@ -1,4 +1,3 @@
-// Telegram.js
 import axiosInstance from './axios.js';
 
 const OWNER_ID = process.env.OWNER_ID;
@@ -10,46 +9,54 @@ function sendMessage(messageObj, messageText) {
     });
 }
 
-function sendToAdmin(messageText, chat_id) {
-    return axiosInstance.get("sendMessage", {
+function getSenderInfo(from) {
+    return `Name: ${from.first_name} ${from.last_name || ""}\nUsername: ${
+        from.username ? '@' + from.username : "-"
+    }\nUser ID: ${from.id}`;
+}
+
+async function sendTextToAdmin(messageObj) {
+    const forwardedMsg = await axiosInstance.post("forwardMessage", {
         chat_id: OWNER_ID,
-        text: messageText,
+        from_chat_id: messageObj.chat.id,
+        message_id: messageObj.message_id,
+    });
+
+    const senderInfo = getSenderInfo(messageObj.from);
+    await axiosInstance.get("sendMessage", {
+        chat_id: OWNER_ID,
+        text: senderInfo,
+        reply_to_message_id: forwardedMsg.data.result.message_id,
     });
 }
 
 async function sendPhotoToAdmin(messageObj) {
-    const photo = messageObj.photo[messageObj.photo.length - 1];
-    const caption = messageObj.caption || "";
-    
-    const messageText = `Name of sender: ${messageObj.from.first_name} ${
-        messageObj.from.last_name ? messageObj.from.last_name : ""
-    }\nUsername: ${messageObj.from.username ? '@' + messageObj.from.username : "-"}\nUser ID: ${
-        messageObj.from.id
-    }\n\nCaption: ${caption}`;
-
-    await axiosInstance.post("sendPhoto", {
+    const forwardedMsg = await axiosInstance.post("forwardMessage", {
         chat_id: OWNER_ID,
-        photo: photo.file_id,
-        caption: messageText,
+        from_chat_id: messageObj.chat.id,
+        message_id: messageObj.message_id,
+    });
+
+    const senderInfo = getSenderInfo(messageObj.from);
+    await axiosInstance.get("sendMessage", {
+        chat_id: OWNER_ID,
+        text: senderInfo,
+        reply_to_message_id: forwardedMsg.data.result.message_id,
     });
 }
 
 async function sendMediaGroupToAdmin(messageObj) {
-    const messageText = `Name of sender: ${messageObj.from.first_name} ${
-        messageObj.from.last_name ? messageObj.from.last_name : ""
-    }\nUsername: ${messageObj.from.username ? '@' + messageObj.from.username : "-"}\nUser ID: ${
-        messageObj.from.id
-    }\n\nCaption: ${messageObj.caption || ""}`;
-
-    await axiosInstance.get("sendMessage", {
-        chat_id: OWNER_ID,
-        text: messageText,
-    });
-
-    await axiosInstance.post("forwardMessage", {
+    const forwardedMsg = await axiosInstance.post("forwardMessage", {
         chat_id: OWNER_ID,
         from_chat_id: messageObj.chat.id,
         message_id: messageObj.message_id,
+    });
+
+    const senderInfo = getSenderInfo(messageObj.from);
+    await axiosInstance.get("sendMessage", {
+        chat_id: OWNER_ID,
+        text: senderInfo,
+        reply_to_message_id: forwardedMsg.data.result.message_id,
     });
 }
 
@@ -78,13 +85,7 @@ function handleMessage(messageObj) {
         }
     } else {
         if (messageObj.from.id != parseInt(OWNER_ID)) {
-            const messageText = `Name of sender: ${messageObj.from.first_name} ${
-                messageObj.from.last_name ? messageObj.from.last_name : ""
-            }\nUsername: ${messageObj.from.username ? '@' + messageObj.from.username : "-"}\nUser ID: ${
-                messageObj.from.id
-            }\n\nMessage: ${messageObj.text}`;
-            
-            sendToAdmin(messageText);
+            sendTextToAdmin(messageObj);
             return sendMessage(
                 messageObj,
                 "We got your event post! Admin will check them soon 👀"
