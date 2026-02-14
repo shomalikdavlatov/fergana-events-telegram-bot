@@ -1,27 +1,12 @@
 import axiosInstance from "./axios.js";
-import fs from "fs/promises";
-import path from "path";
+import { Redis } from "@upstash/redis";
+
+const redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
 const OWNER_ID = process.env.OWNER_ID;
-const MESSAGES_FILE = path.join(process.cwd(), "messages.json");
-
-async function loadMessageMap() {
-    try {
-        const data = await fs.readFile(MESSAGES_FILE, "utf-8");
-        return new Map(JSON.parse(data));
-    } catch (error) {
-        return new Map();
-    }
-}
-
-async function saveMessageMap(messageMap) {
-    try {
-        const data = JSON.stringify(Array.from(messageMap.entries()));
-        await fs.writeFile(MESSAGES_FILE, data, "utf-8");
-    } catch (error) {
-        console.error("Error saving message map:", error);
-    }
-}
 
 function sendMessage(messageObj, messageText) {
     return axiosInstance.get("sendMessage", {
@@ -32,7 +17,7 @@ function sendMessage(messageObj, messageText) {
 
 function getSenderInfo(from) {
     return `Name: ${from.first_name} ${from.last_name || ""}\nUsername: ${
-        from.username ? '@' + from.username : "-"
+        from.username ? "@" + from.username : "-"
     }\nUser ID: ${from.id}`;
 }
 
@@ -50,12 +35,14 @@ async function sendTextToAdmin(messageObj) {
         reply_to_message_id: forwardedMsg.data.result.message_id,
     });
 
-    const messageMap = await loadMessageMap();
-    messageMap.set(forwardedMsg.data.result.message_id, {
-        chat_id: messageObj.chat.id,
-        message_id: messageObj.message_id,
-    });
-    await saveMessageMap(messageMap);
+    // Save to Redis directly
+    await redis.set(
+        `msg:${forwardedMsg.data.result.message_id}`,
+        JSON.stringify({
+            chat_id: messageObj.chat.id,
+            message_id: messageObj.message_id,
+        }),
+    );
 }
 
 async function sendPhotoToAdmin(messageObj) {
@@ -72,12 +59,13 @@ async function sendPhotoToAdmin(messageObj) {
         reply_to_message_id: forwardedMsg.data.result.message_id,
     });
 
-    const messageMap = await loadMessageMap();
-    messageMap.set(forwardedMsg.data.result.message_id, {
-        chat_id: messageObj.chat.id,
-        message_id: messageObj.message_id,
-    });
-    await saveMessageMap(messageMap);
+    await redis.set(
+        `msg:${forwardedMsg.data.result.message_id}`,
+        JSON.stringify({
+            chat_id: messageObj.chat.id,
+            message_id: messageObj.message_id,
+        }),
+    );
 }
 
 async function sendMediaGroupToAdmin(messageObj) {
@@ -94,12 +82,13 @@ async function sendMediaGroupToAdmin(messageObj) {
         reply_to_message_id: forwardedMsg.data.result.message_id,
     });
 
-    const messageMap = await loadMessageMap();
-    messageMap.set(forwardedMsg.data.result.message_id, {
-        chat_id: messageObj.chat.id,
-        message_id: messageObj.message_id,
-    });
-    await saveMessageMap(messageMap);
+    await redis.set(
+        `msg:${forwardedMsg.data.result.message_id}`,
+        JSON.stringify({
+            chat_id: messageObj.chat.id,
+            message_id: messageObj.message_id,
+        }),
+    );
 }
 
 async function handleAdminReply(messageObj) {
@@ -110,37 +99,48 @@ async function handleAdminReply(messageObj) {
         return false;
     }
 
-    const messageMap = await loadMessageMap();
-
-    const originalMessageInfo = messageMap.get(
-        messageObj.reply_to_message.message_id,
+    // Get message info from Redis
+    const originalMessageInfo = await redis.get(
+        `msg:${messageObj.reply_to_message.message_id}`,
     );
 
     if (!originalMessageInfo) {
-
+        // Fallback: check if replying to sender info message
         const senderInfoMessageId = messageObj.reply_to_message.message_id;
 
-        for (const [forwardedMsgId, messageInfo] of messageMap.entries()) {
-            if (Math.abs(forwardedMsgId - senderInfoMessageId) === 1) {
-        
-                if (messageObj.text) {
-                    await axiosInstance.get("sendMessage", {
-                        chat_id: messageInfo.chat_id,
-                        text: messageObj.text,
-                        reply_to_message_id: messageInfo.message_id,
-                    });
-                } else if (messageObj.photo) {
-                    await axiosInstance.post("sendPhoto", {
-                        chat_id: messageInfo.chat_id,
-                        photo: messageObj.photo[messageObj.photo.length - 1]
-                            .file_id,
-                        caption: messageObj.caption || "",
-                        reply_to_message_id: messageInfo.message_id,
-                    });
+        try {
+            const keys = await redis.keys("msg:*");
+
+            for (const key of keys) {
+                const msgId = parseInt(key.replace("msg:", ""));
+                if (Math.abs(msgId - senderInfoMessageId) === 1) {
+                    const messageInfo = await redis.get(key);
+
+                    if (messageInfo) {
+                        if (messageObj.text) {
+                            await axiosInstance.get("sendMessage", {
+                                chat_id: messageInfo.chat_id,
+                                text: messageObj.text,
+                                reply_to_message_id: messageInfo.message_id,
+                            });
+                        } else if (messageObj.photo) {
+                            await axiosInstance.post("sendPhoto", {
+                                chat_id: messageInfo.chat_id,
+                                photo: messageObj.photo[
+                                    messageObj.photo.length - 1
+                                ].file_id,
+                                caption: messageObj.caption || "",
+                                reply_to_message_id: messageInfo.message_id,
+                            });
+                        }
+                        return true;
+                    }
                 }
-                return true;
             }
+        } catch (error) {
+            console.error("Error in fallback search:", error);
         }
+
         return false;
     }
 
@@ -151,7 +151,6 @@ async function handleAdminReply(messageObj) {
             reply_to_message_id: originalMessageInfo.message_id,
         });
     } else if (messageObj.photo) {
-
         await axiosInstance.post("sendPhoto", {
             chat_id: originalMessageInfo.chat_id,
             photo: messageObj.photo[messageObj.photo.length - 1].file_id,
@@ -204,7 +203,6 @@ async function handleTelegramUpdate(update) {
 
     const wasReply = await handleAdminReply(msg);
     if (wasReply) {
-
         await sendMessage(msg, "✅ Reply sent to user!");
         return;
     }
