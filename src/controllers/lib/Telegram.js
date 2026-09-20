@@ -6,7 +6,15 @@ const redis = new Redis({
     token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-const OWNER_ID = process.env.OWNER_ID;
+let OWNER_IDS = [];
+try {
+    OWNER_IDS = JSON.parse(process.env.OWNER_ID || "[]");
+    if (!Array.isArray(OWNER_IDS)) {
+        OWNER_IDS = [parseInt(process.env.OWNER_ID)];
+    }
+} catch (e) {
+    OWNER_IDS = [parseInt(process.env.OWNER_ID)];
+}
 
 function sendMessage(messageObj, messageText) {
     return axiosInstance.get("sendMessage", {
@@ -22,79 +30,97 @@ function getSenderInfo(from) {
 }
 
 async function sendTextToAdmin(messageObj) {
-    const forwardedMsg = await axiosInstance.post("forwardMessage", {
-        chat_id: OWNER_ID,
-        from_chat_id: messageObj.chat.id,
-        message_id: messageObj.message_id,
-    });
-
     const senderInfo = getSenderInfo(messageObj.from);
-    await axiosInstance.get("sendMessage", {
-        chat_id: OWNER_ID,
-        text: senderInfo,
-        reply_to_message_id: forwardedMsg.data.result.message_id,
-    });
+    for (const ownerId of OWNER_IDS) {
+        try {
+            const forwardedMsg = await axiosInstance.post("forwardMessage", {
+                chat_id: ownerId,
+                from_chat_id: messageObj.chat.id,
+                message_id: messageObj.message_id,
+            });
 
-    // Save to Redis directly
-    await redis.set(
-        `msg:${forwardedMsg.data.result.message_id}`,
-        JSON.stringify({
-            chat_id: messageObj.chat.id,
-            message_id: messageObj.message_id,
-        }),
-    );
+            await axiosInstance.get("sendMessage", {
+                chat_id: ownerId,
+                text: senderInfo,
+                reply_to_message_id: forwardedMsg.data.result.message_id,
+            });
+
+            // Save to Redis directly
+            await redis.set(
+                `msg:${forwardedMsg.data.result.message_id}`,
+                JSON.stringify({
+                    chat_id: messageObj.chat.id,
+                    message_id: messageObj.message_id,
+                }),
+            );
+        } catch (error) {
+            console.error(`Failed to send text to admin ${ownerId}:`, error.message);
+        }
+    }
 }
 
 async function sendPhotoToAdmin(messageObj) {
-    const forwardedMsg = await axiosInstance.post("forwardMessage", {
-        chat_id: OWNER_ID,
-        from_chat_id: messageObj.chat.id,
-        message_id: messageObj.message_id,
-    });
-
     const senderInfo = getSenderInfo(messageObj.from);
-    await axiosInstance.get("sendMessage", {
-        chat_id: OWNER_ID,
-        text: senderInfo,
-        reply_to_message_id: forwardedMsg.data.result.message_id,
-    });
+    for (const ownerId of OWNER_IDS) {
+        try {
+            const forwardedMsg = await axiosInstance.post("forwardMessage", {
+                chat_id: ownerId,
+                from_chat_id: messageObj.chat.id,
+                message_id: messageObj.message_id,
+            });
 
-    await redis.set(
-        `msg:${forwardedMsg.data.result.message_id}`,
-        JSON.stringify({
-            chat_id: messageObj.chat.id,
-            message_id: messageObj.message_id,
-        }),
-    );
+            await axiosInstance.get("sendMessage", {
+                chat_id: ownerId,
+                text: senderInfo,
+                reply_to_message_id: forwardedMsg.data.result.message_id,
+            });
+
+            await redis.set(
+                `msg:${forwardedMsg.data.result.message_id}`,
+                JSON.stringify({
+                    chat_id: messageObj.chat.id,
+                    message_id: messageObj.message_id,
+                }),
+            );
+        } catch (error) {
+            console.error(`Failed to send photo to admin ${ownerId}:`, error.message);
+        }
+    }
 }
 
 async function sendMediaGroupToAdmin(messageObj) {
-    const forwardedMsg = await axiosInstance.post("forwardMessage", {
-        chat_id: OWNER_ID,
-        from_chat_id: messageObj.chat.id,
-        message_id: messageObj.message_id,
-    });
-
     const senderInfo = getSenderInfo(messageObj.from);
-    await axiosInstance.get("sendMessage", {
-        chat_id: OWNER_ID,
-        text: senderInfo,
-        reply_to_message_id: forwardedMsg.data.result.message_id,
-    });
+    for (const ownerId of OWNER_IDS) {
+        try {
+            const forwardedMsg = await axiosInstance.post("forwardMessage", {
+                chat_id: ownerId,
+                from_chat_id: messageObj.chat.id,
+                message_id: messageObj.message_id,
+            });
 
-    await redis.set(
-        `msg:${forwardedMsg.data.result.message_id}`,
-        JSON.stringify({
-            chat_id: messageObj.chat.id,
-            message_id: messageObj.message_id,
-        }),
-    );
+            await axiosInstance.get("sendMessage", {
+                chat_id: ownerId,
+                text: senderInfo,
+                reply_to_message_id: forwardedMsg.data.result.message_id,
+            });
+
+            await redis.set(
+                `msg:${forwardedMsg.data.result.message_id}`,
+                JSON.stringify({
+                    chat_id: messageObj.chat.id,
+                    message_id: messageObj.message_id,
+                }),
+            );
+        } catch (error) {
+            console.error(`Failed to send media group to admin ${ownerId}:`, error.message);
+        }
+    }
 }
 
 async function handleAdminReply(messageObj) {
     if (
         !messageObj.reply_to_message ||
-        messageObj.from.id != parseInt(OWNER_ID)
+        !OWNER_IDS.includes(messageObj.from.id)
     ) {
         return false;
     }
@@ -186,7 +212,7 @@ function handleMessage(messageObj) {
                 );
         }
     } else {
-        if (messageObj.from.id != parseInt(OWNER_ID)) {
+        if (!OWNER_IDS.includes(messageObj.from.id)) {
             sendTextToAdmin(messageObj);
             return sendMessage(
                 messageObj,
@@ -208,7 +234,7 @@ async function handleTelegramUpdate(update) {
     }
 
     if (msg.media_group_id) {
-        if (msg.from.id != parseInt(OWNER_ID)) {
+        if (!OWNER_IDS.includes(msg.from.id)) {
             await sendMediaGroupToAdmin(msg);
             await sendMessage(
                 msg,
@@ -219,7 +245,7 @@ async function handleTelegramUpdate(update) {
     }
 
     if (msg.photo && msg.photo.length > 0) {
-        if (msg.from.id != parseInt(OWNER_ID)) {
+        if (!OWNER_IDS.includes(msg.from.id)) {
             await sendPhotoToAdmin(msg);
             await sendMessage(
                 msg,
