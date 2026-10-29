@@ -53,7 +53,7 @@ async function forwardToAdmins(msg) {
       await redis.set(`msg:${ownerId}:${fwdId}`, mapping, { ex: TTL });
       await redis.set(`msg:${ownerId}:${infoId}`, mapping, { ex: TTL });
     } catch (e) {
-      console.error(`Failed to forward to admin ${ownerId}:`, e.message);
+      console.error(`Failed to forward to admin ${ownerId}:`, e.response?.data || e.message);
     }
   }
 }
@@ -103,6 +103,9 @@ async function handleCommand(msg) {
 export async function handleTelegramUpdate(update) {
   const msg = update?.message;
   if (!msg || !msg.from) return;
+
+  // 1. Admin replying to a forwarded post (this was missing in your version)
+  if (await handleAdminReply(msg)) return;
 
   // 2. Commands
   if (msg.text && msg.text.startsWith("/")) {

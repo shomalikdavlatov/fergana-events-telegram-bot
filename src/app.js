@@ -19,8 +19,8 @@ app.post('/webhook', (req, res) => {
   }
   res.sendStatus(200); // answer Telegram immediately
   handleTelegramUpdate(req.body).catch((e) =>
-  console.error('Update error:', e.response?.data || e.message)
-);
+    console.error('Update error:', e.response?.data || e.message)
+  );
 });
 
 const keyPath = path.resolve('certs/key.pem');
