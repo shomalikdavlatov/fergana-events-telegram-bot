@@ -2,268 +2,123 @@ import axiosInstance from "./axios.js";
 import { Redis } from "@upstash/redis";
 
 const redis = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-const OWNER_IDS = (() => {
-    try {
-        const parsed = JSON.parse(process.env.OWNER_ID || '[]');
-        const values = Array.isArray(parsed) ? parsed : [parsed];
+let OWNER_IDS = [];
+try {
+  const parsed = JSON.parse(process.env.OWNER_ID || "[]");
+  OWNER_IDS = (Array.isArray(parsed) ? parsed : [parsed]).map(Number);
+} catch {
+  OWNER_IDS = [parseInt(process.env.OWNER_ID)];
+}
 
-        return values
-            .map(value => Number(value))
-            .filter(value => Number.isSafeInteger(value) && value > 0);
-    } catch {
-        const value = Number(process.env.OWNER_ID);
+const isOwner = (id) => OWNER_IDS.includes(id);
+const RECEIVED = "We got your event post! Admin will check them soon 👀";
+const TTL = 60 * 60 * 24 * 30; // 30 days
 
-        return Number.isSafeInteger(value) && value > 0
-            ? [value]
-            : [];
-    }
-})();
-
-
-function sendMessage(messageObj, messageText) {
-    return axiosInstance.get("sendMessage", {
-        chat_id: messageObj.chat.id,
-        text: messageText,
-    });
+function sendMessage(chatId, text, extra = {}) {
+  return axiosInstance.post("sendMessage", { chat_id: chatId, text, ...extra });
 }
 
 function getSenderInfo(from) {
-    return `Name: ${from.first_name} ${from.last_name || ""}\nUsername: ${
-        from.username ? "@" + from.username : "-"
-    }\nUser ID: ${from.id}`;
+  return `Name: ${from.first_name} ${from.last_name || ""}\nUsername: ${
+    from.username ? "@" + from.username : "-"
+  }\nUser ID: ${from.id}`;
 }
 
-async function sendTextToAdmin(messageObj) {
-    const senderInfo = getSenderInfo(messageObj.from);
-    for (const ownerId of OWNER_IDS) {
-        try {
-            const forwardedMsg = await axiosInstance.post("forwardMessage", {
-                chat_id: ownerId,
-                from_chat_id: messageObj.chat.id,
-                message_id: messageObj.message_id,
-            });
+async function forwardToAdmins(msg) {
+  const info = getSenderInfo(msg.from);
+  const mapping = JSON.stringify({
+    chat_id: msg.chat.id,
+    message_id: msg.message_id,
+  });
 
-            await axiosInstance.get("sendMessage", {
-                chat_id: ownerId,
-                text: senderInfo,
-                reply_to_message_id: forwardedMsg.data.result.message_id,
-            });
+  for (const ownerId of OWNER_IDS) {
+    try {
+      const fwd = await axiosInstance.post("forwardMessage", {
+        chat_id: ownerId,
+        from_chat_id: msg.chat.id,
+        message_id: msg.message_id,
+      });
+      const fwdId = fwd.data.result.message_id;
 
-            // Save to Redis directly
-            await redis.set(
-                `msg:${forwardedMsg.data.result.message_id}`,
-                {
-                    chat_id: messageObj.chat.id,
-                    message_id: messageObj.message_id,
-                },
-            );
-        } catch (error) {
-            console.error(`Failed to send text to admin ${ownerId}:`, error.message);
-        }
+      const infoMsg = await sendMessage(ownerId, info, {
+        reply_to_message_id: fwdId,
+      });
+      const infoId = infoMsg.data.result.message_id;
+
+      // Admin can reply to either the forwarded post or the info message
+      await redis.set(`msg:${ownerId}:${fwdId}`, mapping, { ex: TTL });
+      await redis.set(`msg:${ownerId}:${infoId}`, mapping, { ex: TTL });
+    } catch (e) {
+      console.error(`Failed to forward to admin ${ownerId}:`, e.message);
     }
+  }
 }
 
-async function sendPhotoToAdmin(messageObj) {
-    const senderInfo = getSenderInfo(messageObj.from);
-    for (const ownerId of OWNER_IDS) {
-        try {
-            const forwardedMsg = await axiosInstance.post("forwardMessage", {
-                chat_id: ownerId,
-                from_chat_id: messageObj.chat.id,
-                message_id: messageObj.message_id,
-            });
+async function handleAdminReply(msg) {
+  if (!msg.reply_to_message || !isOwner(msg.from.id)) return false;
 
-            await axiosInstance.get("sendMessage", {
-                chat_id: ownerId,
-                text: senderInfo,
-                reply_to_message_id: forwardedMsg.data.result.message_id,
-            });
+  let info = await redis.get(`msg:${msg.from.id}:${msg.reply_to_message.message_id}`);
+  if (!info) return false;
+  if (typeof info === "string") info = JSON.parse(info);
 
-            await redis.set(
-                `msg:${forwardedMsg.data.result.message_id}`,
-                {
-                    chat_id: messageObj.chat.id,
-                    message_id: messageObj.message_id,
-                },
-            );
-        } catch (error) {
-            console.error(`Failed to send photo to admin ${ownerId}:`, error.message);
-        }
-    }
+  // copyMessage works for text, photo, video, document, voice, etc.
+  await axiosInstance.post("copyMessage", {
+    chat_id: info.chat_id,
+    from_chat_id: msg.chat.id,
+    message_id: msg.message_id,
+    reply_to_message_id: info.message_id,
+  });
+  return true;
 }
 
-async function sendMediaGroupToAdmin(messageObj) {
-    const senderInfo = getSenderInfo(messageObj.from);
-    for (const ownerId of OWNER_IDS) {
-        try {
-            const forwardedMsg = await axiosInstance.post("forwardMessage", {
-                chat_id: ownerId,
-                from_chat_id: messageObj.chat.id,
-                message_id: messageObj.message_id,
-            });
-
-            await axiosInstance.get("sendMessage", {
-                chat_id: ownerId,
-                text: senderInfo,
-                reply_to_message_id: forwardedMsg.data.result.message_id,
-            });
-
-            await redis.set(
-                `msg:${forwardedMsg.data.result.message_id}`,
-                {
-                    chat_id: messageObj.chat.id,
-                    message_id: messageObj.message_id,
-                },
-            );
-        } catch (error) {
-            console.error(`Failed to send media group to admin ${ownerId}:`, error.message);
-        }
-    }
+async function handleCommand(msg) {
+  const command = msg.text.slice(1).split(/[\s@]/)[0];
+  switch (command) {
+    case "start":
+      return sendMessage(msg.chat.id, "Welcome to Fergana Events Bot!");
+    case "help":
+      return sendMessage(
+        msg.chat.id,
+        "You can send events to this bot, and it will share them with the community if approved by the admin."
+      );
+    default:
+      return sendMessage(
+        msg.chat.id,
+        `Command ${msg.text} is not recognized. Type /help for assistance.`
+      );
+  }
 }
 
-async function handleAdminReply(messageObj) {
-    if (
-        !messageObj.reply_to_message ||
-        !OWNER_IDS.includes(messageObj.from.id)
-    ) {
-        return false;
-    }
+export async function handleTelegramUpdate(update) {
+  const msg = update?.message;
+  if (!msg || !msg.from) return;
 
-    // Get message info from Redis
-    const originalMessageInfo = await redis.get(
-        `msg:${messageObj.reply_to_message.message_id}`,
-    );
+  // 1. Admin replying to a forwarded post
+  if (await handleAdminReply(msg)) {
+    await sendMessage(msg.chat.id, "✅ Reply sent to user!");
+    return;
+  }
 
-    if (!originalMessageInfo) {
-        // Fallback: check if replying to sender info message
-        const senderInfoMessageId = messageObj.reply_to_message.message_id;
+  // 2. Commands
+  if (msg.text && msg.text.startsWith("/")) {
+    await handleCommand(msg);
+    return;
+  }
 
-        try {
-            const keys = await redis.keys("msg:*");
+  // 3. Admin's own non-reply messages are ignored
+  if (isOwner(msg.from.id)) return;
 
-            for (const key of keys) {
-                const msgId = parseInt(key.replace("msg:", ""));
-                if (Math.abs(msgId - senderInfoMessageId) === 1) {
-                    const messageInfo = await redis.get(key);
+  // 4. Any user post (text, photo, album, video...) -> admins
+  await forwardToAdmins(msg);
 
-                    if (messageInfo) {
-                        if (messageObj.text) {
-                            await axiosInstance.get("sendMessage", {
-                                chat_id: messageInfo.chat_id,
-                                text: messageObj.text,
-                                reply_to_message_id: messageInfo.message_id,
-                            });
-                        } else if (messageObj.photo) {
-                            await axiosInstance.post("sendPhoto", {
-                                chat_id: messageInfo.chat_id,
-                                photo: messageObj.photo[
-                                    messageObj.photo.length - 1
-                                ].file_id,
-                                caption: messageObj.caption || "",
-                                reply_to_message_id: messageInfo.message_id,
-                            });
-                        }
-                        return true;
-                    }
-                }
-            }
-        } catch (error) {
-            console.error("Error in fallback search:", error);
-        }
-
-        return false;
-    }
-
-    if (messageObj.text) {
-        await axiosInstance.get("sendMessage", {
-            chat_id: originalMessageInfo.chat_id,
-            text: messageObj.text,
-            reply_to_message_id: originalMessageInfo.message_id,
-        });
-    } else if (messageObj.photo) {
-        await axiosInstance.post("sendPhoto", {
-            chat_id: originalMessageInfo.chat_id,
-            photo: messageObj.photo[messageObj.photo.length - 1].file_id,
-            caption: messageObj.caption || "",
-            reply_to_message_id: originalMessageInfo.message_id,
-        });
-    }
-
-    return true;
+  // Send one confirmation per album
+  if (msg.media_group_id) {
+    const first = await redis.set(`mg:${msg.media_group_id}`, 1, { nx: true, ex: 120 });
+    if (!first) return;
+  }
+  await sendMessage(msg.chat.id, RECEIVED);
 }
-
-function handleMessage(messageObj) {
-    const messageText = messageObj.text;
-    if (!messageText) return;
-
-    if (messageText.startsWith("/")) {
-        const command = messageText.substring(1);
-        switch (command) {
-            case "start":
-                return sendMessage(
-                    messageObj,
-                    "Welcome to Fergana Events Bot!",
-                );
-            case "help":
-                return sendMessage(
-                    messageObj,
-                    "You can send events to this bot, and it will share them with the community if approved by the admin.",
-                );
-            default:
-                return sendMessage(
-                    messageObj,
-                    `Command ${messageText} is not recognized. Type /help for assistance.`,
-                );
-        }
-    } else {
-        if (!OWNER_IDS.includes(messageObj.from.id)) {
-            sendTextToAdmin(messageObj);
-            return sendMessage(
-                messageObj,
-                "We got your event post! Admin will check them soon 👀",
-            );
-        }
-    }
-}
-
-async function handleTelegramUpdate(update) {
-    if (!update.message) return;
-
-    const msg = update.message;
-
-    const wasReply = await handleAdminReply(msg);
-    if (wasReply) {
-        await sendMessage(msg, "✅ Reply sent to user!");
-        return;
-    }
-
-    if (msg.media_group_id) {
-        if (!OWNER_IDS.includes(msg.from.id)) {
-            await sendMediaGroupToAdmin(msg);
-            await sendMessage(
-                msg,
-                "We got your event post! Admin will check them soon 👀",
-            );
-        }
-        return;
-    }
-
-    if (msg.photo && msg.photo.length > 0) {
-        if (!OWNER_IDS.includes(msg.from.id)) {
-            await sendPhotoToAdmin(msg);
-            await sendMessage(
-                msg,
-                "We got your event post! Admin will check them soon 👀",
-            );
-        }
-        return;
-    }
-
-    await handleMessage(msg);
-}
-
-export { handleTelegramUpdate };

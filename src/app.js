@@ -1,48 +1,36 @@
-
 import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
+import https from 'https';
 import express from 'express';
-import https from 'node:https';
-import fs from 'node:fs';
-import { handler } from './controllers/index.js';
+import { handleTelegramUpdate } from './controllers/lib/Telegram.js';
 
 const app = express();
-const port = Number(process.env.PORT || 8443);
+const port = process.env.PORT || 8443;
+const SECRET = process.env.WEBHOOK_SECRET;
 
-if (!process.env.WEBHOOK_SECRET) {
-    throw new Error('WEBHOOK_SECRET is missing from .env');
-}
+app.use(express.json());
 
-app.use(express.json({ limit: '1mb' }));
+app.get('/', (req, res) => res.send('OK'));
 
-app.get('/health', (req, res) => {
-    res.status(200).send('Fergana Events Bot is running');
+app.post('/webhook', (req, res) => {
+  if (SECRET && req.get('x-telegram-bot-api-secret-token') !== SECRET) {
+    return res.sendStatus(403);
+  }
+  res.sendStatus(200); // answer Telegram immediately
+  handleTelegramUpdate(req.body).catch((e) =>
+    console.error('Update error:', e.message)
+  );
 });
 
-app.post('/telegram-webhook', async (req, res) => {
-    const secret = req.get('X-Telegram-Bot-Api-Secret-Token');
+const keyPath = path.resolve('certs/key.pem');
+const certPath = path.resolve('certs/cert.pem');
 
-    if (secret !== process.env.WEBHOOK_SECRET) {
-        return res.sendStatus(403);
-    }
-
-    try {
-        await handler(req.body);
-        return res.sendStatus(200);
-    } catch (error) {
-        console.error('Failed to process Telegram update:', error);
-        return res.sendStatus(500);
-    }
-});
-
-const httpsOptions = {
-    key: fs.readFileSync(
-        new URL('../certs/private.key', import.meta.url)
-    ),
-    cert: fs.readFileSync(
-        new URL('../certs/public.pem', import.meta.url)
-    ),
-};
-
-https.createServer(httpsOptions, app).listen(port, '0.0.0.0', () => {
-    console.log(`Fergana Events Bot listening on HTTPS port ${port}`);
-});
+https
+  .createServer(
+    { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) },
+    app
+  )
+  .listen(port, '0.0.0.0', () =>
+    console.log(`Telegram bot listening on https://0.0.0.0:${port}`)
+  );
