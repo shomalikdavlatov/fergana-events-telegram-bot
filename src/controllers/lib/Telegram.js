@@ -65,13 +65,20 @@ async function handleAdminReply(msg) {
   if (!info) return false;
   if (typeof info === "string") info = JSON.parse(info);
 
-  // copyMessage works for text, photo, video, document, voice, etc.
-  await axiosInstance.post("copyMessage", {
-    chat_id: info.chat_id,
-    from_chat_id: msg.chat.id,
-    message_id: msg.message_id,
-    reply_to_message_id: info.message_id,
-  });
+  try {
+    await axiosInstance.post("copyMessage", {
+      chat_id: info.chat_id,
+      from_chat_id: msg.chat.id,
+      message_id: msg.message_id,
+      reply_to_message_id: info.message_id,
+      allow_sending_without_reply: true,
+    });
+    await sendMessage(msg.chat.id, "✅ Reply sent to user!");
+  } catch (e) {
+    const reason = e.response?.data?.description || e.message;
+    console.error("copyMessage failed:", e.response?.data || e.message);
+    await sendMessage(msg.chat.id, `❌ Could not send reply: ${reason}`);
+  }
   return true;
 }
 
@@ -96,12 +103,6 @@ async function handleCommand(msg) {
 export async function handleTelegramUpdate(update) {
   const msg = update?.message;
   if (!msg || !msg.from) return;
-
-  // 1. Admin replying to a forwarded post
-  if (await handleAdminReply(msg)) {
-    await sendMessage(msg.chat.id, "✅ Reply sent to user!");
-    return;
-  }
 
   // 2. Commands
   if (msg.text && msg.text.startsWith("/")) {
