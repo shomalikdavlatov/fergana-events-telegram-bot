@@ -6,15 +6,23 @@ const redis = new Redis({
     token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-let OWNER_IDS = [];
-try {
-    OWNER_IDS = JSON.parse(process.env.OWNER_ID || "[]");
-    if (!Array.isArray(OWNER_IDS)) {
-        OWNER_IDS = [parseInt(process.env.OWNER_ID)];
+const OWNER_IDS = (() => {
+    try {
+        const parsed = JSON.parse(process.env.OWNER_ID || '[]');
+        const values = Array.isArray(parsed) ? parsed : [parsed];
+
+        return values
+            .map(value => Number(value))
+            .filter(value => Number.isSafeInteger(value) && value > 0);
+    } catch {
+        const value = Number(process.env.OWNER_ID);
+
+        return Number.isSafeInteger(value) && value > 0
+            ? [value]
+            : [];
     }
-} catch (e) {
-    OWNER_IDS = [parseInt(process.env.OWNER_ID)];
-}
+})();
+
 
 function sendMessage(messageObj, messageText) {
     return axiosInstance.get("sendMessage", {
@@ -48,10 +56,10 @@ async function sendTextToAdmin(messageObj) {
             // Save to Redis directly
             await redis.set(
                 `msg:${forwardedMsg.data.result.message_id}`,
-                JSON.stringify({
+                {
                     chat_id: messageObj.chat.id,
                     message_id: messageObj.message_id,
-                }),
+                },
             );
         } catch (error) {
             console.error(`Failed to send text to admin ${ownerId}:`, error.message);
@@ -77,10 +85,10 @@ async function sendPhotoToAdmin(messageObj) {
 
             await redis.set(
                 `msg:${forwardedMsg.data.result.message_id}`,
-                JSON.stringify({
+                {
                     chat_id: messageObj.chat.id,
                     message_id: messageObj.message_id,
-                }),
+                },
             );
         } catch (error) {
             console.error(`Failed to send photo to admin ${ownerId}:`, error.message);
@@ -106,10 +114,10 @@ async function sendMediaGroupToAdmin(messageObj) {
 
             await redis.set(
                 `msg:${forwardedMsg.data.result.message_id}`,
-                JSON.stringify({
+                {
                     chat_id: messageObj.chat.id,
                     message_id: messageObj.message_id,
-                }),
+                },
             );
         } catch (error) {
             console.error(`Failed to send media group to admin ${ownerId}:`, error.message);
